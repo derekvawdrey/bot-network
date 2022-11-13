@@ -45,6 +45,7 @@ public class Commands extends System<Commands> {
         add(new DismountCommand());
         add(new DamageCommand());
         add(new DropCommand());
+        add(new AmogusFactoryCommand());
         add(new EnchantCommand());
         add(new FakePlayerCommand());
         add(new FriendsCommand());
