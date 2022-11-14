@@ -23,6 +23,7 @@ import meteordevelopment.meteorclient.systems.System;
 import meteordevelopment.meteorclient.systems.Systems;
 import meteordevelopment.meteorclient.systems.modules.combat.*;
 import meteordevelopment.meteorclient.systems.modules.misc.*;
+import meteordevelopment.meteorclient.systems.modules.misc.amogus_factory.Amogus;
 import meteordevelopment.meteorclient.systems.modules.misc.swarm.Swarm;
 import meteordevelopment.meteorclient.systems.modules.movement.*;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
@@ -547,6 +548,7 @@ public class Modules extends System<Modules> {
 
     private void initMisc() {
         add(new Swarm());
+        add(new Amogus());
         add(new AntiPacketKick());
         add(new AutoClicker());
         add(new AutoLog());

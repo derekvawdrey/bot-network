@@ -5,6 +5,7 @@
 
 package meteordevelopment.meteorclient.systems.modules.world;
 
+import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
@@ -16,20 +17,31 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.notebot.NotebotUtils;
+import meteordevelopment.meteorclient.utils.notebot.song.Note;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.FluidBlock;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.item.PickaxeItem;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.s2c.play.DisconnectS2CPacket;
+import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -83,10 +95,10 @@ public class InfinityMiner extends Module {
 
     // When Full
 
-    public final Setting<Boolean> walkHome = sgWhenFull.add(new BoolSetting.Builder()
-        .name("walk-home")
-        .description("Will walk 'home' when your inventory is full.")
-        .defaultValue(false)
+    public final Setting<Boolean> depositResources = sgWhenFull.add(new BoolSetting.Builder()
+        .name("deposit_resources")
+        .description("Will walk to 'resources' when your inventory is full.")
+        .defaultValue(true)
         .build()
     );
 
@@ -100,7 +112,7 @@ public class InfinityMiner extends Module {
     private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
     private final Settings baritoneSettings = BaritoneAPI.getSettings();
 
-    private final BlockPos.Mutable homePos = new BlockPos.Mutable();
+    private final BlockPos.Mutable resourcePos = new BlockPos.Mutable();
 
     private boolean prevMineScanDroppedItems;
     private boolean repairing;
@@ -113,7 +125,7 @@ public class InfinityMiner extends Module {
     public void onActivate() {
         prevMineScanDroppedItems = baritoneSettings.mineScanDroppedItems.value;
         baritoneSettings.mineScanDroppedItems.value = true;
-        homePos.set(mc.player.getBlockPos());
+        resourcePos.set(mc.player.getBlockPos());
         repairing = false;
     }
 
@@ -126,18 +138,17 @@ public class InfinityMiner extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (isFull()) {
-            if (walkHome.get()) {
+            if (depositResources.get()) {
                 if (isBaritoneNotWalking()) {
-                    info("Walking home.");
-                    baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(homePos));
+                    info("Depositing resources.");
+                    baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
                 }
-                else if (mc.player.getBlockPos().equals(homePos) && logOut.get()) logOut();
+                else if (mc.player.getBlockPos().equals(resourcePos)) {
+                	//Deposit resources
+                	scanForChests();
+                }
             }
-            else if (logOut.get()) logOut();
-            else {
-                info("Inventory full, stopping process.");
-                toggle();
-            }
+            
 
             return;
         }
@@ -176,6 +187,43 @@ public class InfinityMiner extends Module {
         }
     }
 
+    private void scanForChests() {
+        if (mc.interactionManager == null || mc.world == null || mc.player == null) return;
+        int min = (int) (-mc.interactionManager.getReachDistance()) - 3;
+        int max = (int) mc.interactionManager.getReachDistance() + 3;
+
+        // Scan for noteblocks horizontally
+        // 6^3 kek
+        for (int y = min; y < max; y++) {
+            for (int x = min; x < max; x++) {
+                for (int z = min; z < max; z++) {
+                    BlockPos pos = mc.player.getBlockPos().add(x, y + 1, z);
+
+                    BlockState blockState = mc.world.getBlockState(pos);
+                    if (blockState.getBlock() != Blocks.CHEST) continue;
+
+                    // Copied from ServerPlayNetworkHandler#onPlayerInteractBlock
+                    Vec3d vec3d2 = Vec3d.ofCenter(pos);
+                    double sqDist = mc.player.getEyePos().squaredDistanceTo(vec3d2);
+                    if (sqDist > ServerPlayNetworkHandler.MAX_BREAK_SQUARED_DISTANCE) continue;
+                    
+                    if (!isValidScanSpot(pos)) continue;
+                    Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), 100, () -> interactWithChest(pos));
+                }
+            }
+
+        }
+    }
+    
+    private void interactWithChest(BlockPos pos) {
+    	mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, new BlockHitResult(Vec3d.ofCenter(pos), Direction.DOWN, pos, false), 0));
+    }
+    
+    private boolean isValidScanSpot(BlockPos pos) {
+        if (mc.world.getBlockState(pos).getBlock() != Blocks.CHEST) return false;
+        return mc.world.getBlockState(pos.up()).isAir();
+    }
+    
     private boolean needsRepair() {
         ItemStack itemStack = mc.player.getMainHandStack();
         double toolPercentage = ((itemStack.getMaxDamage() - itemStack.getDamage()) * 100f) / (float) itemStack.getMaxDamage();

@@ -359,7 +359,7 @@ public class InventoryTweaks extends Module {
     }
 
     public void dump(ScreenHandler handler) {
-        int playerInvOffset = getRows(handler) * 9;
+        int playerInvOffset = getRows(handler) * 9 - 9;
         MeteorExecutor.execute(() -> moveSlots(handler, playerInvOffset, playerInvOffset + 4 * 9));
     }
 
