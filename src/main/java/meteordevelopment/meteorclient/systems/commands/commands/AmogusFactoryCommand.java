@@ -38,7 +38,6 @@ import static com.mojang.brigadier.Command.SINGLE_SUCCESS;
 public class AmogusFactoryCommand extends Command {
 	
 	private final static SimpleCommandExceptionType AMOGUS_NOT_ACTIVE = new SimpleCommandExceptionType(Text.literal("The Amogus Factory module must be active to use this command."));
-
 	
     public AmogusFactoryCommand() {
         super("amogus-factory", "Executes the Amogus Factory generator", "af");

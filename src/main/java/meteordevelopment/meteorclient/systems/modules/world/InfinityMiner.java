@@ -137,62 +137,69 @@ public class InfinityMiner extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (isFull()) {
-            if (depositResources.get()) {
-                if (isBaritoneNotWalking()) {
-                    info("Depositing resources.");
-                    baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
-                }
-                else if (mc.player.getBlockPos().equals(resourcePos)) {
-                	//Deposit resources
-                	scanForChests();
-                }
-            }
-            
-
-            return;
-        }
-
-        if (!findPickaxe()) {
-            error("Could not find a usable mending pickaxe.");
-            toggle();
-            return;
-        }
-
-        if (!checkThresholds()) {
-            error("Start mining value can't be lower than start repairing value.");
-            toggle();
-            return;
-        }
-
-        if (repairing) {
-            if (!needsRepair()) {
-                warning("Finished repairing, going back to mining.");
-                repairing = false;
-                mineTargetBlocks();
-                return;
-            }
-
-            if (isBaritoneNotMining()) mineRepairBlocks();
-        }
-        else {
-            if (needsRepair()) {
-                warning("Pickaxe needs repair, beginning repair process");
-                repairing = true;
-                mineRepairBlocks();
-                return;
-            }
-
-            if (isBaritoneNotMining()) mineTargetBlocks();
-        }
+    	if(!shouldEat()) {
+	        if (isFull()) {
+	            if (depositResources.get()) {
+	                if (isBaritoneNotWalking()) {
+	                    info("Depositing resources.");
+	                    baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
+	                }
+	                else if (mc.player.getBlockPos().equals(resourcePos)) {
+	                	//Deposit resources
+	                	scanForChests();
+	                }
+	            }
+	            
+	
+	            return;
+	        }
+	
+	        if (!findPickaxe()) {
+	            error("Could not find a usable mending pickaxe.");
+	            toggle();
+	            return;
+	        }
+	
+	        if (!checkThresholds()) {
+	            error("Start mining value can't be lower than start repairing value.");
+	            toggle();
+	            return;
+	        }
+	
+	        if (repairing) {
+	            if (!needsRepair()) {
+	                warning("Finished repairing, going back to mining.");
+	                repairing = false;
+	                mineTargetBlocks();
+	                return;
+	            }
+	
+	            if (isBaritoneNotMining()) mineRepairBlocks();
+	        }
+	        else {
+	            if (needsRepair()) {
+	                warning("Pickaxe needs repair, beginning repair process");
+	                repairing = true;
+	                mineRepairBlocks();
+	                return;
+	            }
+	
+	            if (isBaritoneNotMining()) mineTargetBlocks();
+	        }
+	    }
     }
+    
+	private boolean shouldEat() {
+        return mc.player.getHungerManager().getFoodLevel() <= 16;
+    }
+	
 
     private void scanForChests() {
         if (mc.interactionManager == null || mc.world == null || mc.player == null) return;
         int min = (int) (-mc.interactionManager.getReachDistance()) - 3;
         int max = (int) mc.interactionManager.getReachDistance() + 3;
 
-        // Scan for noteblocks horizontally
+        // Scan for chests horizontally
         // 6^3 kek
         for (int y = min; y < max; y++) {
             for (int x = min; x < max; x++) {
@@ -201,8 +208,6 @@ public class InfinityMiner extends Module {
 
                     BlockState blockState = mc.world.getBlockState(pos);
                     if (blockState.getBlock() != Blocks.CHEST) continue;
-
-                    // Copied from ServerPlayNetworkHandler#onPlayerInteractBlock
                     Vec3d vec3d2 = Vec3d.ofCenter(pos);
                     double sqDist = mc.player.getEyePos().squaredDistanceTo(vec3d2);
                     if (sqDist > ServerPlayNetworkHandler.MAX_BREAK_SQUARED_DISTANCE) continue;
