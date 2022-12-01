@@ -201,6 +201,9 @@ public class ResourceBot extends Module {
 	    	info("Depositing resources.");
 	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
 	        isReturningResources = true;
+	        isReturningToMiningPosition = false;
+	        isMining = false;
+	        isEating = false;
     	}else {
     		//Check if the baritone has finished the goal pathing. Then return to mining area
     		if(mc.player.getBlockPos().equals(resourcePos)) {
@@ -216,6 +219,8 @@ public class ResourceBot extends Module {
 	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(miningPos));
 	        isReturningToMiningPosition = true;
 	        isReturningResources = false;
+	        isMining = false;
+	        isEating = false;
     	}else {
     		//Check if the baritone has finished the goal pathing. and then start mining
     		if(mc.player.getBlockPos().equals(miningPos)) {
@@ -225,12 +230,14 @@ public class ResourceBot extends Module {
     	}
     }
     private void mine() {
-    	if(!isMining && !isEating) {
+    	if(!isMining) {
     		Block[] array = new Block[targetBlocks.get().size()];
             baritone.getPathingBehavior().cancelEverything();
             info("Returning to Mining.");
             baritone.getMineProcess().mine(targetBlocks.get().toArray(array));
             isMining = true;
+            isReturningToMiningPosition = false;
+	        isReturningResources = false;
     	}else {
     		eat();
     	}
