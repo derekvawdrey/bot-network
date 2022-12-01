@@ -563,6 +563,7 @@ public class Modules extends System<Modules> {
         add(new MiddleClickFriend());
         add(new NameProtect());
         add(new Notebot());
+        add(new ResourceBot());
         add(new Notifier());
         add(new PacketCanceller());
         add(new SoundBlocker());
