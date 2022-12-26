@@ -12,6 +12,8 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.process.ICustomGoalProcess;
+import baritone.api.process.IMineProcess;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -139,8 +141,6 @@ public class ResourceBot extends Module {
     
     private final BlockPos.Mutable resourcePos = new BlockPos.Mutable();
     private final BlockPos.Mutable miningPos = new BlockPos.Mutable();
-    private boolean isMining = false;
-    private boolean isEating = false;
     private boolean isReturningResources = false;
     private boolean isReturningToMiningPosition = false;
     private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -163,21 +163,63 @@ public class ResourceBot extends Module {
     }
 
     private void resetVariables() {
-        isMining = false;
-        isEating = false;
         isReturningResources = false;
         isReturningToMiningPosition = false;
+    }
+
+    private void scanForChests() {
+        if (mc.interactionManager == null || mc.world == null || mc.player == null) return;
+        int min = (int) (-mc.interactionManager.getReachDistance()) - 3;
+        int max = (int) mc.interactionManager.getReachDistance() + 3;
+
+        // Scan for chests horizontally
+        // 6^3 kek
+        for (int y = min; y < max; y++) {
+            for (int x = min; x < max; x++) {
+                for (int z = min; z < max; z++) {
+                    BlockPos pos = mc.player.getBlockPos().add(x, y + 1, z);
+
+                    BlockState blockState = mc.world.getBlockState(pos);
+                    if (blockState.getBlock() != Blocks.CHEST) continue;
+                    Vec3d vec3d2 = Vec3d.ofCenter(pos);
+                    double sqDist = mc.player.getEyePos().squaredDistanceTo(vec3d2);
+                    if (sqDist > ServerPlayNetworkHandler.MAX_BREAK_SQUARED_DISTANCE) continue;
+                    
+                    if (!isValidScanSpot(pos)) continue;
+                    Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), 100, () -> interactWithChest(pos));
+                }
+            }
+
+        }
+    }
+    
+    private void interactWithChest(BlockPos pos) {
+    	mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, new BlockHitResult(Vec3d.ofCenter(pos), Direction.DOWN, pos, false), 0));
+    }
+    
+    private boolean isValidScanSpot(BlockPos pos) {
+        if (mc.world.getBlockState(pos).getBlock() != Blocks.CHEST) return false;
+        return mc.world.getBlockState(pos.up()).isAir();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
     	//First we check if inventory is full, if it is return to resource position and deposit resources.
         if(isInventoryFull()) returnResources();
-        
         //If the bot is not returning resources mine
-        else if(!isReturningResources && !isReturningToMiningPosition) {
-        	mine();
+        else if(isReturningToMiningPosition) {
+        	returnToMiningArea();
+        }else {
+        	mineTargetBlocks();
         }
+    }
+    
+    private boolean isBaritoneNotMining() {
+        return !(baritone.getPathingControlManager().mostRecentInControl().orElse(null) instanceof IMineProcess);
+    }
+
+    private boolean isBaritoneNotWalking() {
+        return !(baritone.getPathingControlManager().mostRecentInControl().orElse(null) instanceof ICustomGoalProcess);
     }
     
     private boolean isInventoryFull() {
@@ -196,94 +238,48 @@ public class ResourceBot extends Module {
     }
     
     private void returnResources() {
-    	if(!isReturningResources) {
+    	isReturningResources = true;
+        isReturningToMiningPosition = false;
+    	if(isBaritoneNotWalking()) {
 	    	resourcePos.set(resourceX.get(), resourceY.get(), resourceZ.get());
 	    	info("Depositing resources.");
 	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
-	        isReturningResources = true;
-	        isReturningToMiningPosition = false;
-	        isMining = false;
-	        isEating = false;
-    	}else {
-    		//Check if the baritone has finished the goal pathing. Then return to mining area
-    		if(mc.player.getBlockPos().equals(resourcePos)) {
+    	}
+    	
+		if(mc.player.getBlockPos().equals(resourcePos)) {
+				info("Locating Chests and depositing resources");
+				scanForChests();
+				isReturningResources = false;
+    			isReturningToMiningPosition = true;
     			isReturningResources = false;
     			returnToMiningArea();
-    		}
-    	}
+			
+		}
     }
+
     private void returnToMiningArea() {
-    	if(!isReturningToMiningPosition) {
-	    	miningPos.set(miningX.get(), miningY.get(), miningZ.get());
+    	miningPos.set(miningX.get(), miningY.get(), miningZ.get());
+    	if(mc.player.getBlockPos().equals(miningPos)) {
+			isReturningToMiningPosition = false;
+			mineTargetBlocks();
+		}
+    	else if(isBaritoneNotWalking()) {
 	    	info("Returning to mining position");
 	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(miningPos));
 	        isReturningToMiningPosition = true;
 	        isReturningResources = false;
-	        isMining = false;
-	        isEating = false;
-    	}else {
-    		//Check if the baritone has finished the goal pathing. and then start mining
-    		if(mc.player.getBlockPos().equals(miningPos)) {
-    			isReturningToMiningPosition = false;
-    			mine();
-    		}
-    	}
+    	} 
     }
-    private void mine() {
-    	if(!isMining) {
+    private void mineTargetBlocks() {
+    	if(isBaritoneNotMining()) {
     		Block[] array = new Block[targetBlocks.get().size()];
             baritone.getPathingBehavior().cancelEverything();
             info("Returning to Mining.");
             baritone.getMineProcess().mine(targetBlocks.get().toArray(array));
-            isMining = true;
             isReturningToMiningPosition = false;
 	        isReturningResources = false;
-    	}else {
-    		eat();
     	}
     }
-    private void eat() {
-    	//Check if needs to eat, then eats
-//    	isMining = false;
-//    	isEating = true;
-    }
-
-    /**
-     * Scans for chests nearby and adds them to the map
-     */
-    private void scanForChests() {
-        if (mc.interactionManager == null || mc.world == null || mc.player == null) return;
-        int min = (int) (-mc.interactionManager.getReachDistance()) - 2;
-        int max = (int) mc.interactionManager.getReachDistance() + 2;
-
-        // Scan for noteblocks horizontally
-        // 6^3 kek
-        for (int y = min; y < max; y++) {
-            for (int x = min; x < max; x++) {
-                for (int z = min; z < max; z++) {
-                    BlockPos pos = mc.player.getBlockPos().add(x, y + 1, z);
-
-                    BlockState blockState = mc.world.getBlockState(pos);
-                    if (blockState.getBlock() != Blocks.CHEST) continue;
-
-                    // Copied from ServerPlayNetworkHandler#onPlayerInteractBlock
-                    Vec3d vec3d2 = Vec3d.ofCenter(pos);
-                    double sqDist = mc.player.getEyePos().squaredDistanceTo(vec3d2);
-                    if (sqDist > ServerPlayNetworkHandler.MAX_BREAK_SQUARED_DISTANCE) continue;
-
-                    if (!isValidScanSpot(pos)) continue;
-                    
-                    //Get items from chest 
-                    //do a scan for chests and put them in a scannedChest array
-                }
-            }
-
-        }
-    }
     
-    private boolean isValidScanSpot(BlockPos pos) {
-        if (mc.world.getBlockState(pos).getBlock() != Blocks.CHEST) return false;
-        return mc.world.getBlockState(pos.up()).isAir();
-    }
 }
 
