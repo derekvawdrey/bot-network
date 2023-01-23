@@ -236,9 +236,10 @@ public class InfinityMiner extends Module {
     }
 
     private boolean findPickaxe() {
+    	
         Predicate<ItemStack> pickaxePredicate = (stack -> stack.getItem() instanceof PickaxeItem
-            && Utils.hasEnchantments(stack, Enchantments.MENDING)
-            && !Utils.hasEnchantments(stack, Enchantments.SILK_TOUCH));
+            && Utils.hasEnchantments(stack, Enchantments.MENDING) &&
+           (((stack.getMaxDamage() - stack.getDamage()) * 100f) / (float) stack.getMaxDamage()) > startRepairing.get());
         FindItemResult bestPick = InvUtils.findInHotbar(pickaxePredicate);
 
         if (bestPick.isOffhand()) InvUtils.quickMove().fromOffhand().toHotbar(mc.player.getInventory().selectedSlot);

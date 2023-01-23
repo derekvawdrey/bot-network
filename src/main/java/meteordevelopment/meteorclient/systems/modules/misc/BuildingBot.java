@@ -12,6 +12,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.process.IBuilderProcess;
 import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IMineProcess;
 import meteordevelopment.meteorclient.MeteorClient;
@@ -29,10 +30,12 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Vec3;
+import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.meteorclient.utils.notebot.decoder.*;
 import meteordevelopment.meteorclient.utils.notebot.NotebotUtils;
 import meteordevelopment.meteorclient.utils.notebot.song.Note;
 import meteordevelopment.meteorclient.utils.notebot.song.Song;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -48,6 +51,9 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.ShulkerBoxScreenHandler;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Hand;
@@ -66,42 +72,23 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
-public class ResourceBot extends Module {
+public class BuildingBot extends Module {
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final Setting<List<Block>> targetBlocks = sgGeneral.add(new BlockListSetting.Builder()
             .name("whitelist")
-            .description("Which blocks to show x-rayed.")
+            .description("Which blocks to pick up")
             .defaultValue(
-                Blocks.COAL_ORE,
-                Blocks.DEEPSLATE_COAL_ORE,
-                Blocks.IRON_ORE,
-                Blocks.DEEPSLATE_IRON_ORE,
-                Blocks.GOLD_ORE,
-                Blocks.DEEPSLATE_GOLD_ORE,
-                Blocks.LAPIS_ORE,
-                Blocks.DEEPSLATE_LAPIS_ORE,
-                Blocks.REDSTONE_ORE,
-                Blocks.DEEPSLATE_REDSTONE_ORE,
-                Blocks.DIAMOND_ORE,
-                Blocks.DEEPSLATE_DIAMOND_ORE,
-                Blocks.EMERALD_ORE,
-                Blocks.DEEPSLATE_EMERALD_ORE,
-                Blocks.COPPER_ORE,
-                Blocks.DEEPSLATE_COPPER_ORE,
-                Blocks.NETHER_GOLD_ORE,
-                Blocks.NETHER_QUARTZ_ORE,
-                Blocks.ANCIENT_DEBRIS
+                Blocks.COAL_ORE
             )
             .build()
         );
-    public final Setting<List<Item>> targetItems = sgGeneral.add(new ItemListSetting.Builder()
-            .name("target-items")
-            .description("The target items to collect.")
-            .defaultValue(Items.DIAMOND)
+    private final Setting<String> schematicName = sgGeneral.add(new StringSetting.Builder()
+            .name("schematic-name")
+            .description("X coordinate for resource dropoff location")
+            .defaultValue("1endstone_walls.schem")
             .build()
         );
-    
     private final Setting<Integer> resourceX = sgGeneral.add(new IntSetting.Builder()
             .name("resource-x")
             .description("X coordinate for resource dropoff location")
@@ -120,41 +107,22 @@ public class ResourceBot extends Module {
             .defaultValue(0)
             .build()
         );
-    private final Setting<Integer> miningX = sgGeneral.add(new IntSetting.Builder()
-            .name("mining-x")
-            .description("X coordinate for mining location")
-            .defaultValue(0)
-            .build()
-        );
-    private final Setting<Integer> miningY = sgGeneral.add(new IntSetting.Builder()
-            .name("mining-y")
-            .description("Y coordinate for mining location")
-            .defaultValue(0)
-            .build()
-        );
-    private final Setting<Integer> miningZ = sgGeneral.add(new IntSetting.Builder()
-            .name("mining-z")
-            .description("Z coordinate for mining location")
-            .defaultValue(0)
-            .build()
-        );
-    
     private final BlockPos.Mutable resourcePos = new BlockPos.Mutable();
-    private final BlockPos.Mutable miningPos = new BlockPos.Mutable();
-    private boolean isReturningResources = false;
-    private boolean isReturningToMiningPosition = false;
+    private final BlockPos.Mutable buildingPos = new BlockPos.Mutable();
+    private boolean isGettingResources = false;
+    private boolean isReturningToBuilding = false;
     private final IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
     private final Settings baritoneSettings = BaritoneAPI.getSettings();
 
-
-    public ResourceBot() {
-        super(Categories.World, "resource-bot", "Mines selected resources automatically");
-
+    public BuildingBot() {
+        super(Categories.World, "building-bot", "Build schematics and fetch resource");
+        
     }
 
 
     @Override
     public void onActivate() {
+    	buildingPos.set(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ());
         resetVariables();
     }
 
@@ -164,14 +132,15 @@ public class ResourceBot extends Module {
     }
 
     private void resetVariables() {
-        isReturningResources = false;
-        isReturningToMiningPosition = false;
+        isGettingResources = false;
+        isReturningToBuilding = false;
+        baritone.getBuilderProcess().build(schematicName.get(), buildingPos);
     }
 
     private void scanForChests() {
         if (mc.interactionManager == null || mc.world == null || mc.player == null) return;
-        int min = (int) (-mc.interactionManager.getReachDistance()) - 3;
-        int max = (int) mc.interactionManager.getReachDistance() + 3;
+        int min = (int) (-mc.interactionManager.getReachDistance()) - 4;
+        int max = (int) mc.interactionManager.getReachDistance() + 4;
 
         // Scan for chests horizontally
         // 6^3 kek
@@ -205,20 +174,78 @@ public class ResourceBot extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-    	//First we check if inventory is full, if it is return to resource position and deposit resources.
-        if(isInventoryFull()) returnResources();
-        //If the bot is not returning resources mine
-        else if(isReturningToMiningPosition) {
-        	returnToMiningArea();
-        }else {
-        	mineTargetBlocks();
+    	// If the bot has stopped building and is not getting resources
+        if(baritone.getBuilderProcess().isPaused() && !isGettingResources) {
+        	isGettingResources = true;
+        	isReturningToBuilding = false;
+        	// Set baritone direction
+        	
+        	resourcePos.set(resourceX.get(), resourceY.get(), resourceZ.get());
+        	info("Going to Resource Chest");
+        	baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
+        }
+        // Is getting resources but the inventory is full, so we
+        // have the bot move to the building position
+        else if(isGettingResources && isInventoryFull()) {
+        	isGettingResources = false;
+        	isReturningToBuilding = true;
+        	info("Returning to building");
+        	baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(buildingPos));
+        }
+        else if(isGettingResources) {
+        		if(mc.player.getBlockPos().equals(resourcePos)) {
+        			scanForChests();
+        			info("Getting Resources.");
+        	        ScreenHandler handler = mc.player.currentScreenHandler;
+        	        steal(handler);
+        			if(isInventoryFull()) {
+        				isGettingResources = false;
+            			isReturningToBuilding = true;
+        			}
+        		}
+        	}
+        	
+        	// If getting resources check if you are at the position
+        	else if(isReturningToBuilding) {
+        		if(mc.player.getBlockPos().equals(buildingPos)) {
+        			//baritone.getBuilderProcess().resume();
+        			baritone.getBuilderProcess().build(schematicName.get(), buildingPos);
+        			info("Resuming Build");
+        			isReturningToBuilding = false;
+        			isGettingResources = false;
+        		}
+        	}
+    }
+  
+    private int getRows(ScreenHandler handler) {
+        return (handler instanceof GenericContainerScreenHandler ? ((GenericContainerScreenHandler) handler).getRows() : 3);
+    }
+    
+    public void steal(ScreenHandler handler) {
+        MeteorExecutor.execute(() -> moveSlots(handler, 0, getRows(handler) * 9));
+    }
+    
+    private void moveSlots(ScreenHandler handler, int start, int end) {
+        for (int i = start; i < end; i++) {
+            if (!handler.getSlot(i).hasStack()) continue;
+
+            int sleep = 1;
+            if (sleep > 0) {
+                try {
+                    Thread.sleep(sleep);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            // Exit if user closes screen
+            if (mc.currentScreen == null) break;
+
+            InvUtils.quickMove().slotId(i);
         }
     }
     
-    private boolean isBaritoneNotMining() {
-        return !(baritone.getPathingControlManager().mostRecentInControl().orElse(null) instanceof IMineProcess);
-    }
-
+    
     private boolean isBaritoneNotWalking() {
         return !(baritone.getPathingControlManager().mostRecentInControl().orElse(null) instanceof ICustomGoalProcess);
     }
@@ -226,62 +253,11 @@ public class ResourceBot extends Module {
     private boolean isInventoryFull() {
         for (int i = 0; i <= 35; i++) {
             ItemStack itemStack = mc.player.getInventory().getStack(i);
-
-            for (Item item : targetItems.get()) {
-                if ((itemStack.getItem() == item && itemStack.getCount() < itemStack.getMaxCount())
-                    || itemStack.isEmpty()) {
-                    return false;
-                }
+            if (itemStack.isEmpty()) {
+                return false;
             }
         }
-
         return true;
     }
-    
-    private void returnResources() {
-    	isReturningResources = true;
-        isReturningToMiningPosition = false;
-        resourcePos.set(resourceX.get(), resourceY.get(), resourceZ.get());
-    	if(isBaritoneNotWalking()) {
-	    	info("Depositing resources.");
-	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(resourcePos));
-    	}
-    	
-		if(mc.player.getBlockPos().equals(resourcePos)) {
-				info("Locating Chests and depositing resources");
-				scanForChests();
-				isReturningResources = false;
-    			isReturningToMiningPosition = true;
-    			isReturningResources = false;
-    			returnToMiningArea();
-			
-		}
-    }
-
-    private void returnToMiningArea() {
-    	miningPos.set(miningX.get(), miningY.get(), miningZ.get());
-    	isReturningToMiningPosition = true;
-        isReturningResources = false;
-    	if(isBaritoneNotWalking()) {
-	    	info("Returning to mining position");
-	        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(miningPos));
-    	} 
-    	if(mc.player.getBlockPos().equals(miningPos)) {
-			isReturningToMiningPosition = false;
-			mineTargetBlocks();
-		}
-    }
-    private void mineTargetBlocks() {
-    	if(isBaritoneNotMining()) {
-    		Block[] array = new Block[targetBlocks.get().size()];
-            baritone.getPathingBehavior().cancelEverything();
-            info("Returning to Mining.");
-            baritone.getMineProcess().mine(targetBlocks.get().toArray(array));
-            isReturningToMiningPosition = false;
-	        isReturningResources = false;
-    	}
-    }
-
-    
 }
 

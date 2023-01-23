@@ -570,8 +570,9 @@ public class Modules extends System<Modules> {
         add(new Spam());
         add(new ServerSpoof());
         add(new InventoryTweaks());
+        add(new BuildingBot());
     }
-
+	
     public static class ModuleRegistry extends Registry<Module> {
         public ModuleRegistry() {
             super(RegistryKey.ofRegistry(new MeteorIdentifier("modules")), Lifecycle.stable());

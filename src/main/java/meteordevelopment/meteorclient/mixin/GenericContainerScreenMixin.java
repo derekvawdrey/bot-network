@@ -47,8 +47,6 @@ public abstract class GenericContainerScreenMixin extends HandledScreen<GenericC
                 button -> invTweaks.dump(handler))
             );
         }
-
-        if (invTweaks.autoSteal()) invTweaks.steal(handler);
-        if (invTweaks.autoDump()) invTweaks.dump(handler);
     }
+    
 }
